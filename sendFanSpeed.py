@@ -10,6 +10,7 @@ config.read('fanSpeed.ini')
 fanSpeed = config['fanSpeed']
 fanMinSpeed = fanSpeed.getint('fanMinSpeed', fallback=0)
 fanMaxSpeed = fanSpeed.getint('fanMaxSpeed', fallback=50)
+pwmOutput = fanSpeed.getint('pwmOutput', fallback=0)
 offTemp = fanSpeed.getfloat('offTemp', fallback=40.0)
 minTemp = fanSpeed.getfloat('minTemp', fallback=55.0)
 maxTemp = fanSpeed.getfloat('maxTemp', fallback=75.0)
@@ -56,6 +57,7 @@ def sendFanSpeed(speeds):
     # Create a message sending the desired fan speed for each fan as a byte
     msg = [startMsg]
     msg.extend(speeds)
+    msg.append(pwmOutput)
     msg.append(endMsg)
 
     attempts = 0

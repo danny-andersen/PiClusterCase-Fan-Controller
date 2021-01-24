@@ -18,15 +18,16 @@ int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and <= 2.9
 byte startOfMsg = 0x55;
 byte endOfMsg = 0xAA;
 byte noFanSpeed = 0xFF;
-byte mediumSpeed = 17; //Orange Indicator threshold
-byte defaultSpeed = 25; //One slot on 
-byte highSpeed = 35; //Red Indicator threshold
+byte mediumSpeed = 30; //Orange Indicator threshold
+byte defaultSpeed = 30; //One slot on 
+byte highSpeed = 40; //Red Indicator threshold
 byte maxSpeed = 50;
 byte rangeMulitplier = 5; //Output is 5xrange (max value in 50, 250 output)
 int timeSinceMsg = 0;
 int delayTime = 50; // loop every 50ms
 int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
 int msgRx = LOW;
+bool pwmOut = false; //Wheter to drive output speed as a PWM signal or not.
 
 void setup() {
   for (int i = 0; i < numFans; i++) {
@@ -93,9 +94,18 @@ void receiveMessage(int numBytes) {
         //Comment this out - just used for tx debug
 //        digitalWrite(13, LOW);
       } else {
-        if (started && fanNum < numFans) {
-          //Only process if message has started
-          controlFan(fanNum, b);
+        if (started) {
+          if (fanNum < numFans) {
+            //Only process if message has started
+            controlFan(fanNum, b);
+          } else {
+            if (b > 0) {
+              //Turn on PWM
+              pwmOut = true;
+            } else {
+              pwmOut = false;
+            }
+          }
         }
         fanNum += 1;
       }
@@ -134,10 +144,21 @@ void controlFan(int fanNum, byte speed) {
   } else {
     digitalWrite(enableDriverPair2Pin, LOW);
   }
-  int outputVoltage = speed*rangeMulitplier;
-  if (outputVoltage >= 245) {
-    //Set fully on
-    outputVoltage = 255;
+  int outputVoltage = 0;
+  if (pwmOut) {
+    //Set output voltage based on required speed
+    outputVoltage = speed*rangeMulitplier;
+    if (outputVoltage >= 245) {
+      //Set fully on
+      outputVoltage = 255;
+    }
+  } else {
+    //Drive fan either fully on or fully off
+    if (speed > 0) {
+      outputVoltage = 255;
+    } else {
+      outputVoltage = 0;
+    }
   }
   analogWrite(fanDriverPins[fanNum], outputVoltage);
   setSpeedIndicator(fanNum, speed);
