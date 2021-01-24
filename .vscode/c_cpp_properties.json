@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/home/danny/Arduino/arduino-1.8.13/tools/**",
+                "/home/danny/sketchbooks/libraries/**",
+                "/home/danny/Arduino/arduino-1.8.13/libraries/**",
+                "/home/danny/Arduino/arduino-1.8.13/hardware/tools/**",
+                "/home/danny/Arduino/arduino-1.8.13/hardware/arduino/avr/**",
+                "${workspaceFolder}/**"
+            ],
+            "defines": [],
+            "compilerPath": "/bin/gcc",
+            "cStandard": "gnu17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "gcc-arm64",
+            "forcedInclude": [
+                "/home/danny/Arduino/arduino-1.8.13/hardware/arduino/avr/cores/arduino/Arduino.h"
+            ]
+        }
+    ],
+    "version": 4
+}
