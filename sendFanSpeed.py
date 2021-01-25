@@ -80,7 +80,7 @@ def getHostTempRemote(host):
     temp = 0.0 #No temp measured
     try:
         with Connection(host, user=userName) as conn:
-            result = conn.sudo(tempCommand, hide=True)
+            result = conn.run(tempCommand, hide=True)
             tempStr = result.stdout.strip('\n')
             # print(f"Parsing str :{tempStr} with formatter {tempResultFormat}")
             out = tempResultParser.parse(tempStr)
@@ -150,7 +150,7 @@ def controlFanSpeed():
             
         # Set fan speed
         sendFanSpeed(speeds)
-        sleep(2.0) # Update every couple of seconds
+        sleep(5.0) # Update every couple of seconds
 
 
 if __name__ == "__main__":
