@@ -56,6 +56,8 @@ lastFanState = [0, 0, 0, 0]
 def sendFanSpeed(speeds):
     # Create a message sending the desired fan speed for each fan as a byte
     msg = [startMsg]
+    msg.append(fanMinSpeed) # Send speed range so indicator LED can be driven correctly
+    msg.append(fanMaxSpeed)
     msg.extend(speeds)
     msg.append(pwmOutput)
     msg.append(endMsg)
