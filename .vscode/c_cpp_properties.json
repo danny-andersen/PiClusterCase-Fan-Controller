@@ -10,7 +10,9 @@
                 "/home/danny/Arduino/arduino-1.8.13/hardware/arduino/avr/**",
                 "${workspaceFolder}/**"
             ],
-            "defines": [],
+            "defines": [
+                "USBCON"
+            ],
             "compilerPath": "/bin/gcc",
             "cStandard": "gnu17",
             "cppStandard": "gnu++14",

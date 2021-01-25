@@ -1,4 +1,6 @@
 {
     "board": "arduino:avr:uno",
-    "sketch": "fan-controller/fan-controller.ino"
+    "sketch": "fan-controller/fan-controller.ino",
+    "programmer": "ArduinoISP",
+    "port" : "/dev/ttyACM0"
 }
