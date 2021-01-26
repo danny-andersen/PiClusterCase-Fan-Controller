@@ -129,7 +129,7 @@ def calcFanSpeed(fan, temp):
         if (temp <= lowTemp):
             speed = 0 #Turn Fan off if temp is less than or equal to off temperature
         else:
-            speed = fanMinSpeed + int((fanMaxSpeed - fanMinSpeed) * (temp - lowTemp) / tempRange)
+            speed = fanMinSpeed + int((fanMaxSpeed - fanMinSpeed) * (temp - offTemp) / tempRange)
         
     return speed
 
