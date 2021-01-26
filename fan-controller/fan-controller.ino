@@ -1,34 +1,37 @@
 #include <Wire.h>
 
-int i2cChannel = 0x10;
+const int i2cChannel = 0x10;
 
-int numFans = 4;
-int fanDriverPins[4] = {3, 9, 10, 11};
-int speedIndicatorGreenPins[4] = { 0, 2, 7, 12 };
-int speedIndicatorRedPins[4] = { 1, 4, 8, 13 };
-int enableDriverPair1Pin = 5;
-int enableDriverPair2Pin = 6;
+const int numFans = 4;
+const int fanDriverPins[4] = {3, 9, 10, 11};
+const int speedIndicatorGreenPins[4] = { 0, 2, 7, 12 };
+const int speedIndicatorRedPins[4] = { 1, 4, 8, 13 };
+const int enableDriverPair1Pin = 5;
+const int enableDriverPair2Pin = 6;
 //int powerStatePins[4] = { 14, 15, 16, 17};
 int powerStatePins[4] = { A0, A1, A2, A3};
 
 int currentSpeed[4] = {0, 0, 0, 0};
 int powerState[4] = {0, 0, 0, 0};
-int noSlotsOnMinVolts = 593; //If measured power state voltage > 2.9 no slots are on
-int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and <= 2.9V only one slot is on
-byte startOfMsg = 0x55;
-byte endOfMsg = 0xAA;
-byte noFanSpeed = 0xFF;
-byte minSpeed = 25;
-byte mediumSpeed = 30; //Orange Indicator threshold
-byte defaultSpeed = 30; //One slot on 
-byte highSpeed = 40; //Red Indicator threshold
-byte maxSpeed = 50;
-byte rangeMultiplier = 5; //Output is 5xrange (max value in 50, 250 output)
-int timeSinceMsg = 0;
+const int noSlotsOnMinVolts = 593; //If measured power state voltage > 2.9 no slots are on
+const int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and <= 2.9V only one slot is on
+const byte startOfMsg = 0x55;
+const byte endOfMsg = 0xAA;
+const byte noFanSpeed = 0xFF;
+byte minSpeed = 80;
+byte mediumSpeed = 80; //Orange Indicator threshold
+byte defaultSpeed = 80; //One slot on 
+byte highSpeed = 100; //Red Indicator threshold
+byte maxSpeed = 120;
+byte rangeMultiplier = 2; //Output is 5xrange (max value in 120, 250 output)
+int timeSinceMsg = 15000; //Start as though no received a message
 int delayTime = 50; // loop every 50ms
-int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
+const int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
 int msgRx = LOW;
-bool pwmOut = false; //Wheter to drive output speed as a PWM signal or not.
+bool pwmOut = false; //Whether to drive output speed as a PWM signal or not.
+int blinkCnt = 0; //Used to flash indicator LED if not using temp input but just using power sensing
+int blinkState = HIGH; //Initial state for indicator LED
+const int BLINK_RATE = 500; // Number of ms to turn LED on / off
 
 void setup() {
   for (int i = 0; i < numFans; i++) {
@@ -42,7 +45,7 @@ void setup() {
   digitalWrite(enableDriverPair1Pin, LOW);
   digitalWrite(enableDriverPair2Pin, LOW);
   for (int i = 0; i < numFans; i++) {
-    controlFan(i, 0);
+    controlFan(i, 0, LOW);
   }
   Wire.begin(i2cChannel);            // join i2c bus with address #0x10
   Wire.onReceive(receiveMessage); // register receiver
@@ -58,12 +61,19 @@ void loop() {
     powerState[i] = analogRead(powerStatePins[i]);
   }
   if (timeSinceMsg >= messageTimeout) {
+    blinkCnt += delayTime;
     timeSinceMsg = messageTimeout; //Dont increment timeout further to stop it rolling over
     //No control message received recently - send no fan speed
     //This will drive the fan according to the power status
+    if (blinkCnt >= BLINK_RATE) {
+      blinkState = not blinkState;
+      blinkCnt = 0;
+    } 
     for (int i=0; i<numFans; i++) {
-      controlFan(i, noFanSpeed);
+      controlFan(i, noFanSpeed, blinkState);
     }
+  } else {
+    blinkCnt = 0;
   }
 }
 
@@ -125,11 +135,11 @@ void receiveMessage(int numBytes) {
     rangeMultiplier = 255 / maxSpeed;
   }
   for (int i=0; i< numFans; i++) {
-    controlFan(i, newSpeed[i]);
+    controlFan(i, newSpeed[i], HIGH);
   }
 }
 
-void controlFan(int fanNum, byte speed) {
+void controlFan(int fanNum, byte speed, int blinkState) {
   if (speed == noFanSpeed) {
     int powerInVolts = powerState[fanNum]; 
     //State of slot unknown - use power state to drive fan on or off
@@ -140,7 +150,7 @@ void controlFan(int fanNum, byte speed) {
       speed = defaultSpeed;
     } else {
       //Both slots powered
-      speed = maxSpeed;
+      speed = highSpeed;
     }
 //    if (powerState[fanNum]){
 //      speed = defaultSpeed;
@@ -177,10 +187,10 @@ void controlFan(int fanNum, byte speed) {
     }
   }
   analogWrite(fanDriverPins[fanNum], outputVoltage);
-  setSpeedIndicator(fanNum, speed);
+  setSpeedIndicator(fanNum, speed, blinkState);
 }
 
-void setSpeedIndicator(int fanNum, byte speed) {
+void setSpeedIndicator(int fanNum, byte speed, int blinkState) {
   //Change colour of indicator LED to match speed setting
   //Green - a slot is powered but fan is off
   //Amber - fan is on but only at medium speed
@@ -189,7 +199,7 @@ void setSpeedIndicator(int fanNum, byte speed) {
     int powerInVolts = powerState[fanNum]; 
     if (powerInVolts < noSlotsOnMinVolts) {
       //Show Green led on if at least one of the slots is powered, to show that state is recognised
-      digitalWrite(speedIndicatorGreenPins[fanNum], HIGH);
+      digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
     } else {
       //All off
       digitalWrite(speedIndicatorGreenPins[fanNum], LOW);
@@ -197,15 +207,15 @@ void setSpeedIndicator(int fanNum, byte speed) {
     digitalWrite(speedIndicatorRedPins[fanNum], LOW);
   } else if (speed < mediumSpeed) {
     //Green
-    digitalWrite(speedIndicatorGreenPins[fanNum], HIGH);
+    digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
     digitalWrite(speedIndicatorRedPins[fanNum], LOW);
   } else if (speed < highSpeed) {
     //Amber
-    digitalWrite(speedIndicatorGreenPins[fanNum], HIGH);
-    digitalWrite(speedIndicatorRedPins[fanNum], HIGH);
+    digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
+    digitalWrite(speedIndicatorRedPins[fanNum], blinkState);
   } else {
     //Red
     digitalWrite(speedIndicatorGreenPins[fanNum], LOW);
-    digitalWrite(speedIndicatorRedPins[fanNum], HIGH);
+    digitalWrite(speedIndicatorRedPins[fanNum], blinkState);
   }
 }
