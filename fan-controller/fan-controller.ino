@@ -18,12 +18,13 @@ const int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and 
 const byte startOfMsg = 0x55;
 const byte endOfMsg = 0xAA;
 const byte noFanSpeed = 0xFF;
-byte minSpeed = 80;
-byte mediumSpeed = 80; //Orange Indicator threshold
-byte defaultSpeed = 80; //One slot on 
-byte highSpeed = 100; //Red Indicator threshold
-byte maxSpeed = 120;
-byte rangeMultiplier = 2; //Output is 5xrange (max value in 120, 250 output)
+byte minSpeed[4] = {30, 30, 30, 80}; //These are the defaults
+byte mediumSpeed[4] = {30, 30, 30, 80}; //Orange Indicator threshold
+byte defaultSpeed[4] = {30, 30, 30, 80}; //One slot on 
+byte highSpeed[4] = {50, 50, 50, 120}; //Red Indicator threshold
+byte maxSpeed[4] = {50, 50, 50, 120};
+byte rangeMultiplier = 2;
+byte fanSupplyVolts = 120;
 int timeSinceMsg = 15000; //Start as though no received a message
 int delayTime = 50; // loop every 50ms
 const int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
@@ -78,7 +79,8 @@ void loop() {
 }
 
 //Process any message received
-//Message format: {0x55, minSpeed, maxSpeed, speed1, speed2, speed3, speed4, 0xaa}
+//Message format: {0x55, minSpeed1, maxSpeed1, speed1, minSpeed2, maxSpeed2, speed2, 
+// minSpeed3, maxSpeed3, speed3, minSpeed4, maxSpeed4, speed4, pwmOn, fanSupplyVolts, 0xaa}
 //Speed Range: 0 = off, 50 = full speed, 0xff = status not known
 void receiveMessage(int numBytes) {
   int fanNum = 0;
@@ -86,6 +88,7 @@ void receiveMessage(int numBytes) {
   int newMaxSpeed = -1;
   int newSpeed[4] = {0, 0, 0, 0};
   bool started = false;
+  bool pwmRx = false;
   while (Wire.available()) {
     // loop through all bytes
     byte b = Wire.read(); // receive byte
@@ -103,36 +106,36 @@ void receiveMessage(int numBytes) {
 //        msgRx = LOW;
 //      }
     } else if (started) {
-      if (b == endOfMsg) {
-        started = false;
-        //Comment this out - just used for tx debug
-//        digitalWrite(13, LOW);
-      } else {
-        if (newMinSpeed == -1) {
-          newMinSpeed = b;
-        } else if (newMaxSpeed == -1) {
-          newMaxSpeed = b;
-        } else if (fanNum < numFans) {
-          newSpeed[fanNum] = b;
-          fanNum += 1;
-        } else {
-          if (b > 0) {
-            //Turn on PWM
-            pwmOut = true;
-          } else {
-            pwmOut = false;
-          }
+      if (newMinSpeed == -1) {
+        newMinSpeed = b;
+      } else if (newMaxSpeed == -1) {
+        newMaxSpeed = b;
+      } else if (fanNum < numFans) {
+        newSpeed[fanNum] = b;
+        if (newMinSpeed != minSpeed[fanNum] || newMaxSpeed != maxSpeed[fanNum]) {
+          minSpeed[fanNum] = newMinSpeed;
+          maxSpeed[fanNum] = newMaxSpeed;
+          mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
+          defaultSpeed[fanNum] = minSpeed[fanNum]; //One slot on 
+          highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
         }
+        fanNum += 1;
+        if (fanNum < numFans) {
+          newMinSpeed = -1;
+          newMaxSpeed = -1;
+        }
+      } else if (not pwmRx) {
+        if (b > 0) {
+          //Turn on PWM
+          pwmOut = true;
+        } else {
+          pwmOut = false;
+        }
+      } else {
+        fanSupplyVolts = b;
+        rangeMultiplier = 255 / fanSupplyVolts;
       }
     }
-  }
-  if (newMinSpeed != minSpeed || newMaxSpeed != maxSpeed) {
-    minSpeed = newMinSpeed;
-    maxSpeed = newMaxSpeed;
-    mediumSpeed = minSpeed; //Orange Indicator threshold
-    defaultSpeed = minSpeed; //One slot on 
-    highSpeed = minSpeed + ((maxSpeed - minSpeed) / 2); //Red Indicator threshold
-    rangeMultiplier = 255 / maxSpeed;
   }
   for (int i=0; i< numFans; i++) {
     controlFan(i, newSpeed[i], HIGH);
@@ -147,10 +150,10 @@ void controlFan(int fanNum, byte speed, int blinkState) {
       speed = 0;
     } else if (powerInVolts >= oneSlotOnMinVolts) {
       //One slot is powered
-      speed = defaultSpeed;
+      speed = defaultSpeed[fanNum];
     } else {
       //Both slots powered
-      speed = highSpeed;
+      speed = highSpeed[fanNum];
     }
 //    if (powerState[fanNum]){
 //      speed = defaultSpeed;
@@ -158,8 +161,8 @@ void controlFan(int fanNum, byte speed, int blinkState) {
 //      speed = 0; //turn it off
 //    }
   }
-  //Send speed to PWM output for fan
   currentSpeed[fanNum] = speed;
+  //Enable LM293 output for fan pair
   if (currentSpeed[0] > 0 || currentSpeed[1] > 0) {
     digitalWrite(enableDriverPair1Pin, HIGH);
   } else {
@@ -174,7 +177,7 @@ void controlFan(int fanNum, byte speed, int blinkState) {
   if (pwmOut) {
     //Set output voltage based on required speed
     outputVoltage = speed*rangeMultiplier;
-    if (outputVoltage >= 245) {
+    if (outputVoltage >= 240) {
       //Set fully on
       outputVoltage = 255;
     }
@@ -186,7 +189,11 @@ void controlFan(int fanNum, byte speed, int blinkState) {
       outputVoltage = 0;
     }
   }
-  analogWrite(fanDriverPins[fanNum], outputVoltage);
+  if (fanNum != 1) {
+    analogWrite(fanDriverPins[fanNum], outputVoltage);
+  } else {
+    analogWrite(fanDriverPins[1], 128);
+  }
   setSpeedIndicator(fanNum, speed, blinkState);
 }
 
@@ -205,11 +212,11 @@ void setSpeedIndicator(int fanNum, byte speed, int blinkState) {
       digitalWrite(speedIndicatorGreenPins[fanNum], LOW);
     }
     digitalWrite(speedIndicatorRedPins[fanNum], LOW);
-  } else if (speed < mediumSpeed) {
+  } else if (speed < mediumSpeed[fanNum]) {
     //Green
     digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
     digitalWrite(speedIndicatorRedPins[fanNum], LOW);
-  } else if (speed < highSpeed) {
+  } else if (speed < highSpeed[fanNum]) {
     //Amber
     digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
     digitalWrite(speedIndicatorRedPins[fanNum], blinkState);

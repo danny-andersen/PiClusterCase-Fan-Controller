@@ -8,8 +8,12 @@ from parse import parse, compile
 config = configparser.ConfigParser()
 config.read('fanSpeed.ini')
 fanSpeed = config['fanSpeed']
-fanMinSpeed = fanSpeed.getint('fanMinSpeed', fallback=0)
-fanMaxSpeed = fanSpeed.getint('fanMaxSpeed', fallback=50)
+fanSpeedRange = [0, 0, 0, 0]
+for f in range(1,5):
+    minS = fanSpeed.getint(f'fan{f}MinSpeed', fallback=30)
+    maxS = fanSpeed.getint(f'fan{f}MaxSpeed', fallback=50)
+    fanSpeedRange[f-1] = (minS, maxS)
+fanSupplyVoltage = fanSpeed.getint('fanSupplyVoltage', fallback=120)
 pwmOutput = fanSpeed.getint('pwmOutput', fallback=0)
 offTemp = fanSpeed.getfloat('offTemp', fallback=40.0)
 minTemp = fanSpeed.getfloat('minTemp', fallback=55.0)
@@ -56,10 +60,13 @@ lastFanState = [0, 0, 0, 0]
 def sendFanSpeed(speeds):
     # Create a message sending the desired fan speed for each fan as a byte
     msg = [startMsg]
-    msg.append(fanMinSpeed) # Send speed range so indicator LED can be driven correctly
-    msg.append(fanMaxSpeed)
-    msg.extend(speeds)
+    for fan in range(0,4):
+        (minS, maxS) = fanSpeedRange[fan]
+        msg.append(minS) # Send speed range so indicator LED can be driven correctly
+        msg.append(maxS)
+        msg.append(speeds[fan])
     msg.append(pwmOutput)
+    msg.append(fanSupplyVoltage)
     msg.append(endMsg)
 
     attempts = 0
@@ -95,7 +102,7 @@ def getTempByHost(hosts):
     groupResult = None
     with ThreadingGroup(*hosts, user=userName) as grp:
         try:
-            groupResult = grp.sudo(tempCommand, hide=True)
+            groupResult = grp.run(tempCommand, hide=True)
         except exceptions.GroupException as res:
             groupResult = res.args[0]
             pass
@@ -129,6 +136,7 @@ def calcFanSpeed(fan, temp):
         if (temp <= lowTemp):
             speed = 0 #Turn Fan off if temp is less than or equal to off temperature
         else:
+            (fanMinSpeed, fanMaxSpeed) = fanSpeedRange[fan]
             speed = fanMinSpeed + int((fanMaxSpeed - fanMinSpeed) * (temp - offTemp) / tempRange)
         
     return speed
