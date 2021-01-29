@@ -18,18 +18,18 @@ const int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and 
 const byte startOfMsg = 0x55;
 const byte endOfMsg = 0xAA;
 const byte noFanSpeed = 0xFF;
-byte minSpeed[4] = {30, 30, 30, 80}; //These are the defaults
-byte mediumSpeed[4] = {30, 30, 30, 80}; //Orange Indicator threshold
-byte defaultSpeed[4] = {30, 30, 30, 80}; //One slot on 
-byte highSpeed[4] = {50, 50, 50, 120}; //Red Indicator threshold
-byte maxSpeed[4] = {50, 50, 50, 120};
-byte rangeMultiplier = 2;
+byte minSpeed[4] = {100, 100, 100, 60}; //These are the defaults
+byte mediumSpeed[4] = {0, 0, 0, 0}; //Orange Indicator threshold
+byte defaultSpeed[4] = {0, 0, 0, 0}; //One slot on 
+byte highSpeed[4] = {0,0,0,0}; //Red Indicator threshold
+byte maxSpeed[4] = {120, 120, 120, 120};
 byte fanSupplyVolts = 120;
+byte rangeMultiplier = 255 / fanSupplyVolts;
 int timeSinceMsg = 15000; //Start as though no received a message
 int delayTime = 50; // loop every 50ms
 const int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
 int msgRx = LOW;
-bool pwmOut = false; //Whether to drive output speed as a PWM signal or not.
+bool pwmOut = true; //Whether to drive output speed as a PWM signal or not.
 int blinkCnt = 0; //Used to flash indicator LED if not using temp input but just using power sensing
 int blinkState = HIGH; //Initial state for indicator LED
 const int BLINK_RATE = 500; // Number of ms to turn LED on / off
@@ -45,8 +45,11 @@ void setup() {
   //Set everything to off
   digitalWrite(enableDriverPair1Pin, LOW);
   digitalWrite(enableDriverPair2Pin, LOW);
-  for (int i = 0; i < numFans; i++) {
-    controlFan(i, 0, LOW);
+  for (int fanNum = 0; fanNum < numFans; fanNum++) {
+    controlFan(fanNum, 0, LOW);
+    mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
+    defaultSpeed[fanNum] = minSpeed[fanNum]; //One slot on 
+    highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
   }
   Wire.begin(i2cChannel);            // join i2c bus with address #0x10
   Wire.onReceive(receiveMessage); // register receiver
@@ -153,7 +156,8 @@ void controlFan(int fanNum, byte speed, int blinkState) {
       speed = defaultSpeed[fanNum];
     } else {
       //Both slots powered
-      speed = highSpeed[fanNum];
+      // speed = highSpeed[fanNum];
+      speed = maxSpeed[fanNum];
     }
 //    if (powerState[fanNum]){
 //      speed = defaultSpeed;
