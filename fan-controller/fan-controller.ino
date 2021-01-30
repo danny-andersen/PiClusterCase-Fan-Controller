@@ -18,13 +18,12 @@ const int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and 
 const byte startOfMsg = 0x55;
 const byte endOfMsg = 0xAA;
 const byte noFanSpeed = 0xFF;
-byte minSpeed[4] = {100, 100, 100, 60}; //These are the defaults
+byte minSpeed[4] = {60, 60, 60, 40}; //These are the defaults
 byte mediumSpeed[4] = {0, 0, 0, 0}; //Orange Indicator threshold
-byte defaultSpeed[4] = {0, 0, 0, 0}; //One slot on 
 byte highSpeed[4] = {0,0,0,0}; //Red Indicator threshold
-byte maxSpeed[4] = {120, 120, 120, 120};
+byte maxSpeed[4] = {100, 100, 100, 120};
 byte fanSupplyVolts = 120;
-byte rangeMultiplier = 255 / fanSupplyVolts;
+float rangeMultiplier = 255.0 / fanSupplyVolts;
 int timeSinceMsg = 15000; //Start as though no received a message
 int delayTime = 50; // loop every 50ms
 const int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
@@ -48,7 +47,6 @@ void setup() {
   for (int fanNum = 0; fanNum < numFans; fanNum++) {
     controlFan(fanNum, 0, LOW);
     mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
-    defaultSpeed[fanNum] = minSpeed[fanNum]; //One slot on 
     highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
   }
   Wire.begin(i2cChannel);            // join i2c bus with address #0x10
@@ -119,7 +117,6 @@ void receiveMessage(int numBytes) {
           minSpeed[fanNum] = newMinSpeed;
           maxSpeed[fanNum] = newMaxSpeed;
           mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
-          defaultSpeed[fanNum] = minSpeed[fanNum]; //One slot on 
           highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
         }
         fanNum += 1;
@@ -136,7 +133,7 @@ void receiveMessage(int numBytes) {
         }
       } else {
         fanSupplyVolts = b;
-        rangeMultiplier = 255 / fanSupplyVolts;
+        rangeMultiplier = 255.0 / fanSupplyVolts;
       }
     }
   }
@@ -153,7 +150,7 @@ void controlFan(int fanNum, byte speed, int blinkState) {
       speed = 0;
     } else if (powerInVolts >= oneSlotOnMinVolts) {
       //One slot is powered
-      speed = defaultSpeed[fanNum];
+      speed = mediumSpeed[fanNum];
     } else {
       //Both slots powered
       // speed = highSpeed[fanNum];
@@ -180,7 +177,7 @@ void controlFan(int fanNum, byte speed, int blinkState) {
   int outputVoltage = 0;
   if (pwmOut) {
     //Set output voltage based on required speed
-    outputVoltage = speed*rangeMultiplier;
+    outputVoltage = byte(speed*rangeMultiplier);
     if (outputVoltage >= 240) {
       //Set fully on
       outputVoltage = 255;
