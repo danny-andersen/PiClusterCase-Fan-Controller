@@ -5,6 +5,8 @@ from fabric2 import Connection, ThreadingGroup, Result, exceptions
 from paramiko import ssh_exception
 from parse import parse, compile
 
+CRC7_POLY = 0x91
+
 config = configparser.ConfigParser()
 config.read('fanSpeed.ini')
 fanSpeed = config['fanSpeed']
@@ -28,9 +30,9 @@ bus = SMBus(channel)
 #  Arduino addr
 address = int(comms.get('address'), 16)
 # Protocol values
-startMsg = int(comms.get('startMsg', fallback='0x55'), 16)
-endMsg = int(comms.get('endMsg', fallback='0xaa'), 16)
-noFanSpeed = int(comms.get('noFanSpeed', fallback=0xff), 16)
+startMsg = int(comms.get('startMsg', fallback=240))
+endMsg = int(comms.get('endMsg', fallback=250))
+noFanSpeed = int(comms.get('noFanSpeed', fallback=250))
 
 # Shell command params to get host temp
 shellConfig = config['shell']
@@ -56,32 +58,6 @@ for slot in fans:
         fanByHost[hostInSlot] = int(fans[slot])
 
 lastFanState = [0, 0, 0, 0]
-
-def sendFanSpeed(speeds):
-    # Create a message sending the desired fan speed for each fan as a byte
-    msg = [startMsg]
-    for fan in range(0,4):
-        (minS, maxS) = fanSpeedRange[fan]
-        msg.append(minS) # Send speed range so indicator LED can be driven correctly
-        msg.append(maxS)
-        msg.append(speeds[fan])
-    msg.append(pwmOutput)
-    msg.append(fanSupplyVoltage)
-    msg.append(endMsg)
-
-    attempts = 0
-    sent = False
-    while (not sent and attempts < 3):
-        try: 
-            attempts += 1
-            # Write out I2C command: address, offset, msg
-            bus.write_i2c_block_data(address, 0, msg)
-            sent = True
-            print (f"Sent: {msg}")
-        except OSError:
-            sleep(0.5) # Wait then retry
-            print(f"Failed to send message {msg}")
-
 
 def getHostTempRemote(host):
     temp = 0.0 #No temp measured
@@ -125,6 +101,7 @@ def calcFanSpeed(fan, temp):
         speed = noFanSpeed
         lastFanState[fan] = 1
     else:
+        (fanMinSpeed, fanMaxSpeed) = fanSpeedRange[fan]
         if (lastFanState[fan]):
             lowTemp = offTemp # keep fan on until it is below the off temp
         else:
@@ -135,31 +112,77 @@ def calcFanSpeed(fan, temp):
             lastFanState[fan] = 1
         if (temp <= lowTemp):
             speed = 0 #Turn Fan off if temp is less than or equal to off temperature
+        elif (temp >= maxTemp):
+            speed = fanMaxSpeed
         else:
-            (fanMinSpeed, fanMaxSpeed) = fanSpeedRange[fan]
             speed = fanMinSpeed + int((fanMaxSpeed - fanMinSpeed) * (temp - offTemp) / tempRange)
         
     return speed
 
-def controlFanSpeed():
-    while True:
-        tempsByHost = getTempByHost(hostList)
-        speeds = [noFanSpeed, noFanSpeed, noFanSpeed, noFanSpeed]
-        tempsByFan = [[],[],[],[]]
-        for host in hostList:
-            # Read each host temperature and calculate fan speed
-            temp = tempsByHost.get(host, 0.0)
-            fan = fanByHost[host]
-            tempsByFan[fan-1].append(temp)
-        print (f"Measured Temps: {tempsByFan}")
-        for fan in range(0, len(speeds)):
-            # Calc fan speed for max temp for hosts cooled by a fan
-            speeds[fan] = calcFanSpeed(fan, max(tempsByFan[fan]))
-            
-        # Set fan speed
-        sendFanSpeed(speeds)
-        sleep(5.0) # Update every couple of seconds
+def getRequiredFanSpeeds():
+    tempsByHost = getTempByHost(hostList)
+    speeds = [noFanSpeed, noFanSpeed, noFanSpeed, noFanSpeed]
+    tempsByFan = [[],[],[],[]]
+    for host in hostList:
+        # Read each host temperature and calculate fan speed
+        temp = tempsByHost.get(host, 0.0)
+        fan = fanByHost[host]
+        tempsByFan[fan-1].append(temp)
+    print (f"Measured Temps: {tempsByFan}")
+    for fan in range(0, len(speeds)):
+        # Calc fan speed for max temp for hosts cooled by a fan
+        speeds[fan] = calcFanSpeed(fan, max(tempsByFan[fan]))
+    return speeds
 
+def createPayload(speeds):
+    #Create payload sending the desired fan speed for each fan as a byte
+    data = []
+    for fan in range(0,4):
+        (minS, maxS) = fanSpeedRange[fan]
+        data.append(minS) # Send speed range so indicator LED can be driven correctly
+        data.append(maxS)
+        data.append(speeds[fan])
+    data.append(pwmOutput)
+    data.append(fanSupplyVoltage)
+    return data
+
+def getCRC(data):
+  crc = 0
+  for b in data:
+    crc ^= b
+    for _ in range(0,8):
+        if (crc & 1):
+            crc ^= CRC7_POLY
+        crc >>= 1
+  return crc
+
+def sendMessage(payload):
+    # Create a message 
+    msg = [startMsg]
+    msg.extend(payload)
+    msg.append(getCRC(payload))
+    msg.append(endMsg)
+
+    attempts = 0
+    sent = False
+    while (not sent and attempts < 3):
+        try: 
+            # Write out I2C command: address, offset, msg
+            bus.write_i2c_block_data(address, 0, msg)
+            sent = True
+            print (f"Sent: {msg}")
+        except OSError:
+            attempts += 1
+            sleep(1.0) # Wait then retry
+            print(f"Failed to send message {msg}")
+    return attempts
 
 if __name__ == "__main__":
-    controlFanSpeed()    
+    while True:
+        #Get the speeds to set per fan based on CPU temps
+        speeds = getRequiredFanSpeeds()
+        #Create message payload
+        payload = createPayload(speeds)
+        # Send payload to controller
+        noOfTries = sendMessage(payload)
+        sleep(5.0 - noOfTries) # Update every couple of seconds

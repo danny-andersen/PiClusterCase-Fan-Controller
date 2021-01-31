@@ -1,23 +1,31 @@
 #include <Wire.h>
 
-const int i2cChannel = 0x10;
+// I/O constants
+const int PINS_FAN_DRIVER[4] = {3, 9, 10, 11};
+const int PINS_INDICATOR_LED_GREEN[4] = { 0, 2, 7, 12 };
+const int PINS_INDICATOR_LED_RED[4] = { 1, 4, 8, 13 };
+const int PIN_ENABLE_DRIVER_PAIR_1 = 5;
+const int PIN_ENABLE_DRIVER_PAIR_2 = 6;
+const int PINS_POWER_STATE_IN[4] = { A0, A1, A2, A3};
+const int NO_SLOT_ON_VOLTS_MIN = 593; //If measured power state voltage > 2.9 no slots are on
+const int ONE_SLOT_ON_VOLTS_MIN = 350; //If measured power state voltage > 1.7V and <= 2.9V only one slot is on
 
-const int numFans = 4;
-const int fanDriverPins[4] = {3, 9, 10, 11};
-const int speedIndicatorGreenPins[4] = { 0, 2, 7, 12 };
-const int speedIndicatorRedPins[4] = { 1, 4, 8, 13 };
-const int enableDriverPair1Pin = 5;
-const int enableDriverPair2Pin = 6;
-//int powerStatePins[4] = { 14, 15, 16, 17};
-int powerStatePins[4] = { A0, A1, A2, A3};
+// Message constants
+const int I2C_CHANNEL = 0x10;
+const byte START_MSG = 240;
+const byte END_MSG = 250;
+const byte NO_FAN_SPEED = 255;
+const byte MSG_LEN = 17; //bytes in message
+const byte DATA_LEN = 14; //data length
+const byte DATA_BYTES_PER_FAN = 3; //3 data bytes per fan
+const byte CRC7_POLY = 0x91;
+const int NUM_FANS = 4;
+const int MSG_TIMEOUT = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
+const int BLINK_RATE = 500; // Number of ms to turn indicator LED on / off if no fan speed set for fan
 
 int currentSpeed[4] = {0, 0, 0, 0};
 int powerState[4] = {0, 0, 0, 0};
-const int noSlotsOnMinVolts = 593; //If measured power state voltage > 2.9 no slots are on
-const int oneSlotOnMinVolts = 350; //If measured power state voltage > 1.7V and <= 2.9V only one slot is on
-const byte startOfMsg = 0x55;
-const byte endOfMsg = 0xAA;
-const byte noFanSpeed = 0xFF;
+
 byte minSpeed[4] = {60, 60, 60, 40}; //These are the defaults
 byte mediumSpeed[4] = {0, 0, 0, 0}; //Orange Indicator threshold
 byte highSpeed[4] = {0,0,0,0}; //Red Indicator threshold
@@ -26,30 +34,28 @@ byte fanSupplyVolts = 120;
 float rangeMultiplier = 255.0 / fanSupplyVolts;
 int timeSinceMsg = 15000; //Start as though no received a message
 int delayTime = 50; // loop every 50ms
-const int messageTimeout = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
 int msgRx = LOW;
 bool pwmOut = true; //Whether to drive output speed as a PWM signal or not.
 int blinkCnt = 0; //Used to flash indicator LED if not using temp input but just using power sensing
 int blinkState = HIGH; //Initial state for indicator LED
-const int BLINK_RATE = 500; // Number of ms to turn LED on / off
 
 void setup() {
-  for (int i = 0; i < numFans; i++) {
-    pinMode(speedIndicatorGreenPins[i], OUTPUT);
-    pinMode(speedIndicatorRedPins[i], OUTPUT);
-//    pinMode(powerStatePins[i], INPUT);
+  for (int i = 0; i < NUM_FANS; i++) {
+    pinMode(PINS_INDICATOR_LED_GREEN[i], OUTPUT);
+    pinMode(PINS_INDICATOR_LED_RED[i], OUTPUT);
+//    pinMode(PINS_POWER_STATE_IN[i], INPUT);
   }
-  pinMode(enableDriverPair1Pin, OUTPUT);
-  pinMode(enableDriverPair2Pin, OUTPUT);
+  pinMode(PIN_ENABLE_DRIVER_PAIR_1, OUTPUT);
+  pinMode(PIN_ENABLE_DRIVER_PAIR_2, OUTPUT);
   //Set everything to off
-  digitalWrite(enableDriverPair1Pin, LOW);
-  digitalWrite(enableDriverPair2Pin, LOW);
-  for (int fanNum = 0; fanNum < numFans; fanNum++) {
+  digitalWrite(PIN_ENABLE_DRIVER_PAIR_1, LOW);
+  digitalWrite(PIN_ENABLE_DRIVER_PAIR_2, LOW);
+  for (int fanNum = 0; fanNum < NUM_FANS; fanNum++) {
     controlFan(fanNum, 0, LOW);
     mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
     highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
   }
-  Wire.begin(i2cChannel);            // join i2c bus with address #0x10
+  Wire.begin(I2C_CHANNEL);            // join i2c bus with address #0x10
   Wire.onReceive(receiveMessage); // register receiver
   //Debug I2C bus
 //  pinMode(13, OUTPUT);
@@ -59,20 +65,20 @@ void setup() {
 void loop() {
   delay(delayTime); //ms
   timeSinceMsg += delayTime;
-  for (int i=0; i<numFans; i++) {
-    powerState[i] = analogRead(powerStatePins[i]);
+  for (int i=0; i<NUM_FANS; i++) {
+    powerState[i] = analogRead(PINS_POWER_STATE_IN[i]);
   }
-  if (timeSinceMsg >= messageTimeout) {
+  if (timeSinceMsg >= MSG_TIMEOUT) {
     blinkCnt += delayTime;
-    timeSinceMsg = messageTimeout; //Dont increment timeout further to stop it rolling over
+    timeSinceMsg = MSG_TIMEOUT; //Dont increment timeout further to stop it rolling over
     //No control message received recently - send no fan speed
     //This will drive the fan according to the power status
     if (blinkCnt >= BLINK_RATE) {
       blinkState = not blinkState;
       blinkCnt = 0;
     } 
-    for (int i=0; i<numFans; i++) {
-      controlFan(i, noFanSpeed, blinkState);
+    for (int i=0; i<NUM_FANS; i++) {
+      controlFan(i, NO_FAN_SPEED, blinkState);
     }
   } else {
     blinkCnt = 0;
@@ -84,71 +90,89 @@ void loop() {
 // minSpeed3, maxSpeed3, speed3, minSpeed4, maxSpeed4, speed4, pwmOn, fanSupplyVolts, 0xaa}
 //Speed Range: 0 = off, 50 = full speed, 0xff = status not known
 void receiveMessage(int numBytes) {
-  int fanNum = 0;
-  int newMinSpeed = -1;
-  int newMaxSpeed = -1;
-  int newSpeed[4] = {0, 0, 0, 0};
-  bool started = false;
-  bool pwmRx = false;
+  bool validMsg = true;
+  byte data[DATA_LEN]; //14 bytes of data
+  int dataCnt = 0;
+  bool start = false;
+  bool crcRx = false;
   while (Wire.available()) {
     // loop through all bytes
     byte b = Wire.read(); // receive byte
-    if ((not started) && (b == startOfMsg)) {
-      started = true;
-      fanNum = 0;
-      timeSinceMsg = 0;
-      //Blink led (note comment out when using indicator for fan 4)
-//      digitalWrite(13, HIGH);
-//      if (msgRx == LOW) {
-//        digitalWrite(13, HIGH);
-//        msgRx = HIGH;
-//      } else {
-//        digitalWrite(13, LOW);
-//        msgRx = LOW;
-//      }
-    } else if (started) {
-      if (newMinSpeed == -1) {
-        newMinSpeed = b;
-      } else if (newMaxSpeed == -1) {
-        newMaxSpeed = b;
-      } else if (fanNum < numFans) {
-        newSpeed[fanNum] = b;
-        if (newMinSpeed != minSpeed[fanNum] || newMaxSpeed != maxSpeed[fanNum]) {
-          minSpeed[fanNum] = newMinSpeed;
-          maxSpeed[fanNum] = newMaxSpeed;
-          mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
-          highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
-        }
-        fanNum += 1;
-        if (fanNum < numFans) {
-          newMinSpeed = -1;
-          newMaxSpeed = -1;
-        }
-      } else if (not pwmRx) {
-        if (b > 0) {
-          //Turn on PWM
-          pwmOut = true;
-        } else {
-          pwmOut = false;
-        }
-      } else {
-        fanSupplyVolts = b;
-        rangeMultiplier = 255.0 / fanSupplyVolts;
+    if (!start) {
+      if (b == START_MSG) {
+        start = true;
       }
+    } else if (dataCnt < DATA_LEN) {
+      data[dataCnt++] = b;
+    } else if (not crcRx) {
+      //Check crc
+      byte crc = getCRC(data, DATA_LEN);
+      if (b != crc) {
+        validMsg = false;
+      }
+      crcRx = true;
+    } else if (b != END_MSG) {
+        validMsg = false;
     }
   }
-  for (int i=0; i< numFans; i++) {
-    controlFan(i, newSpeed[i], HIGH);
+  if (validMsg) {
+    int newSpeed[4] = {0, 0, 0, 0};
+    int offset = 0;
+    timeSinceMsg = 0;
+    for (int fanNum = 0; fanNum < NUM_FANS; fanNum++) {
+      offset = fanNum * DATA_BYTES_PER_FAN; //3 data bytes per fan
+      int newMinSpeed = data[offset++];
+      int newMaxSpeed = data[offset++];
+      newSpeed[fanNum] = data[offset++];
+      if (newMinSpeed != minSpeed[fanNum] || newMaxSpeed != maxSpeed[fanNum]) {
+        minSpeed[fanNum] = newMinSpeed;
+        maxSpeed[fanNum] = newMaxSpeed;
+        mediumSpeed[fanNum] = minSpeed[fanNum]; //Orange Indicator threshold
+        highSpeed[fanNum] = minSpeed[fanNum] + ((maxSpeed[fanNum] - minSpeed[fanNum]) / 2); //Red Indicator threshold
+        //Check if speed being set is greater than the max speed
+        //Note: but only if the new speed is not the NO_FAN_SPEED indicator
+        if (newSpeed[fanNum] != NO_FAN_SPEED && newSpeed[fanNum] > maxSpeed[fanNum]) {
+          newSpeed[fanNum] = maxSpeed[fanNum];
+        }
+      }
+      offset = NUM_FANS * DATA_BYTES_PER_FAN;
+      if (data[offset++] > 0) {
+        //Turn on PWM
+        pwmOut = true;
+      } else {
+        pwmOut = false;
+      }
+      fanSupplyVolts = data[offset++];
+      rangeMultiplier = 255.0 / fanSupplyVolts;
+    }
+    //Set new speed
+    for (int i=0; i< NUM_FANS; i++) {
+      controlFan(i, newSpeed[i], HIGH);
+    }
   }
 }
 
+byte getCRC(byte message[], byte length) {
+  byte crc = 0;
+ 
+  for (int i = 0; i < length; i++) {
+    crc ^= message[i];
+    for (int j = 0; j < 8; j++) {
+      if (crc & 1)
+        crc ^= CRC7_POLY;
+      crc >>= 1;
+    }
+  }
+  return crc;
+}
+
 void controlFan(int fanNum, byte speed, int blinkState) {
-  if (speed == noFanSpeed) {
+  if (speed == NO_FAN_SPEED) {
     int powerInVolts = powerState[fanNum]; 
     //State of slot unknown - use power state to drive fan on or off
-    if (powerInVolts > noSlotsOnMinVolts) {
+    if (powerInVolts > NO_SLOT_ON_VOLTS_MIN) {
       speed = 0;
-    } else if (powerInVolts >= oneSlotOnMinVolts) {
+    } else if (powerInVolts >= ONE_SLOT_ON_VOLTS_MIN) {
       //One slot is powered
       speed = mediumSpeed[fanNum];
     } else {
@@ -165,14 +189,14 @@ void controlFan(int fanNum, byte speed, int blinkState) {
   currentSpeed[fanNum] = speed;
   //Enable LM293 output for fan pair
   if (currentSpeed[0] > 0 || currentSpeed[1] > 0) {
-    digitalWrite(enableDriverPair1Pin, HIGH);
+    digitalWrite(PIN_ENABLE_DRIVER_PAIR_1, HIGH);
   } else {
-    digitalWrite(enableDriverPair1Pin, LOW);
+    digitalWrite(PIN_ENABLE_DRIVER_PAIR_1, LOW);
   }
   if (currentSpeed[2] > 0 || currentSpeed[3] > 0) {
-    digitalWrite(enableDriverPair2Pin, HIGH);
+    digitalWrite(PIN_ENABLE_DRIVER_PAIR_2, HIGH);
   } else {
-    digitalWrite(enableDriverPair2Pin, LOW);
+    digitalWrite(PIN_ENABLE_DRIVER_PAIR_2, LOW);
   }
   int outputVoltage = 0;
   if (pwmOut) {
@@ -190,11 +214,11 @@ void controlFan(int fanNum, byte speed, int blinkState) {
       outputVoltage = 0;
     }
   }
-  if (fanNum != 1) {
-    analogWrite(fanDriverPins[fanNum], outputVoltage);
-  } else {
-    analogWrite(fanDriverPins[1], 128);
-  }
+  // if (fanNum != 1) {
+    analogWrite(PINS_FAN_DRIVER[fanNum], outputVoltage);
+  // } else {
+  //   analogWrite(fanDriverPins[1], 128);
+  // }
   setSpeedIndicator(fanNum, speed, blinkState);
 }
 
@@ -205,25 +229,25 @@ void setSpeedIndicator(int fanNum, byte speed, int blinkState) {
   //Red - fan is at high speed
   if (speed == 0) {
     int powerInVolts = powerState[fanNum]; 
-    if (powerInVolts < noSlotsOnMinVolts) {
+    if (powerInVolts < NO_SLOT_ON_VOLTS_MIN) {
       //Show Green led on if at least one of the slots is powered, to show that state is recognised
-      digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
+      digitalWrite(PINS_INDICATOR_LED_GREEN[fanNum], blinkState);
     } else {
       //All off
-      digitalWrite(speedIndicatorGreenPins[fanNum], LOW);
+      digitalWrite(PINS_INDICATOR_LED_GREEN[fanNum], LOW);
     }
-    digitalWrite(speedIndicatorRedPins[fanNum], LOW);
+    digitalWrite(PINS_INDICATOR_LED_RED[fanNum], LOW);
   } else if (speed < mediumSpeed[fanNum]) {
     //Green
-    digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
-    digitalWrite(speedIndicatorRedPins[fanNum], LOW);
+    digitalWrite(PINS_INDICATOR_LED_GREEN[fanNum], blinkState);
+    digitalWrite(PINS_INDICATOR_LED_RED[fanNum], LOW);
   } else if (speed < highSpeed[fanNum]) {
     //Amber
-    digitalWrite(speedIndicatorGreenPins[fanNum], blinkState);
-    digitalWrite(speedIndicatorRedPins[fanNum], blinkState);
+    digitalWrite(PINS_INDICATOR_LED_GREEN[fanNum], blinkState);
+    digitalWrite(PINS_INDICATOR_LED_RED[fanNum], blinkState);
   } else {
     //Red
-    digitalWrite(speedIndicatorGreenPins[fanNum], LOW);
-    digitalWrite(speedIndicatorRedPins[fanNum], blinkState);
+    digitalWrite(PINS_INDICATOR_LED_GREEN[fanNum], LOW);
+    digitalWrite(PINS_INDICATOR_LED_RED[fanNum], blinkState);
   }
 }
