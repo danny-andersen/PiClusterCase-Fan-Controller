@@ -1,3 +1,4 @@
+//#include <avr.h>
 #include <Wire.h>
 
 // I/O constants
@@ -20,8 +21,10 @@ const byte DATA_LEN = 14; //data length
 const byte DATA_BYTES_PER_FAN = 3; //3 data bytes per fan
 const byte CRC7_POLY = 0x91;
 const int NUM_FANS = 4;
-const int MSG_TIMEOUT = 15000;  // If no message of 15 seconds then use power detection to drive fan on or off
-const int BLINK_RATE = 500; // Number of ms to turn indicator LED on / off if no fan speed set for fan
+const int MSG_TIMEOUT = 150;  // If no message rx 15 seconds then use power detection to drive fan on or off
+const int COMMS_HUNG_TIMEOUT = 600;  // If no message rx for 60 seconds then allow watchdog to time out and do a reset 
+const int BLINK_RATE = 5; // Number of DELAY_TIMEs to turn indicator LED on / off if no fan speed set for fan
+const int DELAY_TIME = 100; // loop every 100ms
 
 int currentSpeed[4] = {0, 0, 0, 0};
 int powerState[4] = {0, 0, 0, 0};
@@ -32,8 +35,7 @@ byte highSpeed[4] = {0,0,0,0}; //Red Indicator threshold
 byte maxSpeed[4] = {100, 100, 100, 120};
 byte fanSupplyVolts = 120;
 float rangeMultiplier = 255.0 / fanSupplyVolts;
-int timeSinceMsg = 15000; //Start as though no received a message
-int delayTime = 50; // loop every 50ms
+int timeSinceMsg = MSG_TIMEOUT; //Start as though no received a message
 int msgRx = LOW;
 bool pwmOut = true; //Whether to drive output speed as a PWM signal or not.
 int blinkCnt = 0; //Used to flash indicator LED if not using temp input but just using power sensing
@@ -43,7 +45,6 @@ void setup() {
   for (int i = 0; i < NUM_FANS; i++) {
     pinMode(PINS_INDICATOR_LED_GREEN[i], OUTPUT);
     pinMode(PINS_INDICATOR_LED_RED[i], OUTPUT);
-//    pinMode(PINS_POWER_STATE_IN[i], INPUT);
   }
   pinMode(PIN_ENABLE_DRIVER_PAIR_1, OUTPUT);
   pinMode(PIN_ENABLE_DRIVER_PAIR_2, OUTPUT);
@@ -60,19 +61,19 @@ void setup() {
   //Debug I2C bus
 //  pinMode(13, OUTPUT);
 //  digitalWrite(13, LOW);
+  setWatchDog(); //Two second watchdog timeout
 }
 
 void loop() {
-  delay(delayTime); //ms
-  timeSinceMsg += delayTime;
+  delay(DELAY_TIME); //ms
+  timeSinceMsg++;
   for (int i=0; i<NUM_FANS; i++) {
     powerState[i] = analogRead(PINS_POWER_STATE_IN[i]);
   }
   if (timeSinceMsg >= MSG_TIMEOUT) {
-    blinkCnt += delayTime;
-    timeSinceMsg = MSG_TIMEOUT; //Dont increment timeout further to stop it rolling over
-    //No control message received recently - send no fan speed
+    //No control message received recently - blink indicator LED and send no fan speed
     //This will drive the fan according to the power status
+    blinkCnt ++;
     if (blinkCnt >= BLINK_RATE) {
       blinkState = not blinkState;
       blinkCnt = 0;
@@ -83,6 +84,14 @@ void loop() {
   } else {
     blinkCnt = 0;
   }
+  if (timeSinceMsg >= COMMS_HUNG_TIMEOUT) {
+    //Not received any comms for an extended period
+    //This could be because I2C Wire comms has hung 
+    //So force a reset
+    softwareReset();
+  }
+  //Kick the watchdog so that we dont get reset
+  kickWatchDog(); 
 }
 
 //Process any message received
@@ -250,4 +259,28 @@ void setSpeedIndicator(int fanNum, byte speed, int blinkState) {
     digitalWrite(PINS_INDICATOR_LED_GREEN[fanNum], LOW);
     digitalWrite(PINS_INDICATOR_LED_RED[fanNum], blinkState);
   }
+}
+
+void setWatchDog() {
+  // enable watchdog 
+  //Ideally this would use the in-built watchdog
+  //but am using an old boot loader which causes and endless reset on timeout
+  // wdt_enable(WDTO_2S);
+}
+
+void kickWatchDog() {
+  // reset watchdog with the provided prescaller
+  // wdt_reset();
+}
+
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
+
+void softwareReset() {
+  // force watchdog timeout by setting short time
+  // wdt_enable(WDTO_30MS);
+  // wait for the prescaller time to expire
+  // while(1) {}
+  //As watchdog timeout causes an endless reset due to the old bootloader not resetting the watchdog
+  //use the simple function that restarts the code.
+  resetFunc();  //call reset
 }
