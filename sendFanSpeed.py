@@ -4,6 +4,7 @@ import configparser
 from fabric2 import Connection, ThreadingGroup, Result, exceptions
 from paramiko import ssh_exception
 from parse import parse, compile
+from datetime import datetime
 
 CRC7_POLY = 0x91
 
@@ -21,6 +22,7 @@ offTemp = fanSpeed.getfloat('offTemp', fallback=40.0)
 minTemp = fanSpeed.getfloat('minTemp', fallback=55.0)
 maxTemp = fanSpeed.getfloat('maxTemp', fallback=75.0)
 tempRange = (maxTemp - offTemp)
+timeStr = ""
 
 # I2C channel 1 is connected to the GPIO pins
 comms = config['comms']
@@ -128,7 +130,7 @@ def getRequiredFanSpeeds():
         temp = tempsByHost.get(host, 0.0)
         fan = fanByHost[host]
         tempsByFan[fan-1].append(temp)
-    print (f"Measured Temps: {tempsByFan}")
+    print (f"{timeStr}: Measured Temps: {tempsByFan}")
     for fan in range(0, len(speeds)):
         # Calc fan speed for max temp for hosts cooled by a fan
         speeds[fan] = calcFanSpeed(fan, max(tempsByFan[fan]))
@@ -170,15 +172,17 @@ def sendMessage(payload):
             # Write out I2C command: address, offset, msg
             bus.write_i2c_block_data(address, 0, msg)
             sent = True
-            print (f"Sent: {msg}")
+            #print (f"{timeStr}: Sent: {msg}")
         except OSError:
             attempts += 1
             sleep(1.0) # Wait then retry
-            print(f"Failed to send message {msg}")
+            print(f"{timeStr}: Failed to send message {msg}")
     return attempts
 
 if __name__ == "__main__":
     while True:
+        n = datetime.now()
+        timeStr = n.strftime("%Y/%m/%d %H:%M:%S")
         #Get the speeds to set per fan based on CPU temps
         speeds = getRequiredFanSpeeds()
         #Create message payload

@@ -1,0 +1,12 @@
+[Unit]
+Description=Service to send fan speeds to external fan controller
+
+[Install]
+WantedBy=default.target
+
+[Service]
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=/home/danny/Cluster/fanController.log
+WorkingDirectory=/home/danny/git/PiClusterCase-Fan-Controller/
+# Command to execute when the service is started
+ExecStart=/bin/python /home/danny/git/PiClusterCase-Fan-Controller/sendFanSpeed.py
