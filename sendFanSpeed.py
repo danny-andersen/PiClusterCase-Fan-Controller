@@ -72,18 +72,25 @@ def getHostTempRemote(host):
             if (out): temp = out[0]
             # print(f"Temp extracted {temp}")
     except ssh_exception.NoValidConnectionsError:
+        print(f"Got NoValidConnectionsError running command {tempCommand} on host {host}")
         pass
+    except ssh_exception.SSHException:
+        print(f"Got SSH exception running command {tempCommand} on host {host}")
     return temp
 
 def getTempByHost(hosts):
     tempByHost = dict()
     groupResult = None
-    with ThreadingGroup(*hosts, user=userName) as grp:
+    with ThreadingGroup(*hosts, user=userName, connect_timeout=10) as grp:
         try:
             groupResult = grp.run(tempCommand, hide=True)
         except exceptions.GroupException as res:
-            groupResult = res.args[0]
+            print(f"Got GroupException running command: {res}")
+        except ssh_exception.NoValidConnectionsError as res:
+            print(f"Got NoValidConnectionsError running command: {res}")
             pass
+        except ssh_exception.SSHException as res:
+            print(f"Got SSH exception running command: {res}")
         if (groupResult):
             # successfull = groupResult.succeeded
             for conn in groupResult:
@@ -93,11 +100,12 @@ def getTempByHost(hosts):
                     # print(f"Parsing str :{tempStr} with formatter {tempResultFormat}")
                     out = tempResultParser.parse(tempStr)
                     if (out): tempByHost[conn.host] = out[0]
+            else:
+                print(f"Failed to run command on host: {groupResult}")
     return tempByHost
 
 # From the measured CPU temperature determine how fast to spin the fan
 # This keeps the fan noise to a minimum based on how hard the CPU is working
-# But: it requires a fan with a PWM input.
 def calcFanSpeed(fan, temp):
     if (temp == 0):
         speed = noFanSpeed
