@@ -65,7 +65,7 @@ def getHostTempRemote(host):
     temp = 0.0 #No temp measured
     try:
         with Connection(host, user=userName) as conn:
-            result = conn.run(tempCommand, hide=True)
+            result = conn.run(tempCommand, hide=True, timeout=5)
             tempStr = result.stdout.strip('\n')
             # print(f"Parsing str :{tempStr} with formatter {tempResultFormat}")
             out = tempResultParser.parse(tempStr)
@@ -83,13 +83,15 @@ def getTempByHost(hosts):
     groupResult = None
     with ThreadingGroup(*hosts, user=userName, connect_timeout=10) as grp:
         try:
-            groupResult = grp.run(tempCommand, hide=True)
+            groupResult = grp.run(tempCommand, hide=True, timeout=5)
         except exceptions.GroupException as res:
+            groupResult = res.args[0]
             print(f"Got GroupException running command: {res}")
         except ssh_exception.NoValidConnectionsError as res:
+            groupResult = res.args[0]
             print(f"Got NoValidConnectionsError running command: {res}")
-            pass
         except ssh_exception.SSHException as res:
+            groupResult = res.args[0]
             print(f"Got SSH exception running command: {res}")
         if (groupResult):
             # successfull = groupResult.succeeded
@@ -100,8 +102,8 @@ def getTempByHost(hosts):
                     # print(f"Parsing str :{tempStr} with formatter {tempResultFormat}")
                     out = tempResultParser.parse(tempStr)
                     if (out): tempByHost[conn.host] = out[0]
-            else:
-                print(f"Failed to run command on host: {groupResult}")
+        else:
+            print(f"Failed to run command: {groupResult}")
     return tempByHost
 
 # From the measured CPU temperature determine how fast to spin the fan
