@@ -4,7 +4,8 @@ import configparser
 from fabric2 import Connection, ThreadingGroup, Result, exceptions
 from paramiko import ssh_exception
 from parse import parse, compile
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
 
 CRC7_POLY = 0x91
 
@@ -44,8 +45,8 @@ tempResultParser = compile(tempResultFormat)
 userName = shellConfig['userName']
 
 # Read hosts.ini file
-config = configparser.ConfigParser()
-config.read('hosts.ini')
+# configHosts = configparser.ConfigParser()
+# configHosts.read('hosts.ini')
 hosts = config['hosts']
 hostList = []
 for slot in hosts:
@@ -78,32 +79,52 @@ def getHostTempRemote(host):
         print(f"Got SSH exception running command {tempCommand} on host {host}")
     return temp
 
-def getTempByHost(hosts):
+def getTempByHostThreaded(hosts, tempByHost):
+    if len(hosts) > 0:
+        groupResult = None
+        with ThreadingGroup(*hosts, user=userName, connect_timeout=10) as grp:
+            try:
+                groupResult = grp.run(tempCommand, hide=True, timeout=5)
+            except exceptions.GroupException as res:
+                groupResult = res.args[0]
+                print(f"Got GroupException running command: {res}")
+            except ssh_exception.NoValidConnectionsError as res:
+                groupResult = res.args[0]
+                print(f"Got NoValidConnectionsError running command: {res}")
+            except ssh_exception.SSHException as res:
+                groupResult = res.args[0]
+                print(f"Got SSH exception running command: {res}")
+            if (groupResult):
+                # successfull = groupResult.succeeded
+                for conn in groupResult:
+                    result = groupResult[conn]
+                    if isinstance(result, Result): #Only process successful commands
+                        tempStr = result.stdout.strip('\n')
+                        # print(f"Remote result: Parsing str :{tempStr} with formatter {tempResultFormat}")
+                        out = tempResultParser.parse(tempStr)
+                        if (out): tempByHost[conn.host] = out[0]
+            else:
+                print(f"Failed to run command: {groupResult}")
+    return tempByHost
+
+def getTempByHostLocal(hosts: list[str]):
     tempByHost = dict()
-    groupResult = None
-    with ThreadingGroup(*hosts, user=userName, connect_timeout=10) as grp:
+    tempDir = config['localResultFiles']['resultlocation']
+    nowTime = datetime.now().timestamp()
+    for host in hosts:
+        resultFile = f"{tempDir}/{host}.txt"
         try:
-            groupResult = grp.run(tempCommand, hide=True, timeout=5)
-        except exceptions.GroupException as res:
-            groupResult = res.args[0]
-            print(f"Got GroupException running command: {res}")
-        except ssh_exception.NoValidConnectionsError as res:
-            groupResult = res.args[0]
-            print(f"Got NoValidConnectionsError running command: {res}")
-        except ssh_exception.SSHException as res:
-            groupResult = res.args[0]
-            print(f"Got SSH exception running command: {res}")
-        if (groupResult):
-            # successfull = groupResult.succeeded
-            for conn in groupResult:
-                result = groupResult[conn]
-                if isinstance(result, Result): #Only process successful commands
-                    tempStr = result.stdout.strip('\n')
-                    # print(f"Parsing str :{tempStr} with formatter {tempResultFormat}")
+            with open(resultFile, 'r') as tempFile:
+                #Check timestamp, if greater than 2 mins ago, ignore
+                if (nowTime - os.stat(resultFile).st_mtime <= 120):
+                    tempStr = tempFile.read().strip('\n')
+                    # print(f"Local result: Parsing str :{tempStr} with formatter {tempResultFormat}")
                     out = tempResultParser.parse(tempStr)
-                    if (out): tempByHost[conn.host] = out[0]
-        else:
-            print(f"Failed to run command: {groupResult}")
+                    if (out): 
+                        tempByHost[host] = out[0]
+        except FileNotFoundError:
+            #May happen
+            pass 
     return tempByHost
 
 # From the measured CPU temperature determine how fast to spin the fan
@@ -132,7 +153,9 @@ def calcFanSpeed(fan, temp):
     return speed
 
 def getRequiredFanSpeeds():
-    tempsByHost = getTempByHost(hostList)
+    tempsByHost = getTempByHostLocal(hostList)
+    hosts = [ host for host in hostList if host not in tempsByHost ]
+    tempsByHost = getTempByHostThreaded(hosts, tempsByHost)
     speeds = [noFanSpeed, noFanSpeed, noFanSpeed, noFanSpeed]
     tempsByFan = [[],[],[],[]]
     for host in hostList:
@@ -199,4 +222,4 @@ if __name__ == "__main__":
         payload = createPayload(speeds)
         # Send payload to controller
         noOfTries = sendMessage(payload)
-        sleep(5.0 - noOfTries) # Update every couple of seconds
+        sleep(15.0 - noOfTries) # Update every couple of seconds

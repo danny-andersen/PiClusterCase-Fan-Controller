@@ -1,0 +1,9 @@
+---
+- hosts: cluster
+  become: yes
+
+  tasks:
+    - name: Ensure a job that runs every minute exists to read CPU temp
+      ansible.builtin.cron:
+        name: "Read CPU temp and store"
+        job: "sudo vcgencmd measure_temp >/data/logs/host-temp/$(hostname).txt"

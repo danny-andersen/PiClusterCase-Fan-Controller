@@ -1,3 +1,6 @@
+#Note that this is run as a user service
+#To check on its status run "systemctl --user status fancontrol"
+
 [Unit]
 Description=Service to send fan speeds to external fan controller
 
