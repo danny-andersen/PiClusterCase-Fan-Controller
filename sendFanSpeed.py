@@ -154,8 +154,8 @@ def calcFanSpeed(fan, temp):
 
 def getRequiredFanSpeeds():
     tempsByHost = getTempByHostLocal(hostList)
-    hosts = [ host for host in hostList if host not in tempsByHost ]
-    tempsByHost = getTempByHostThreaded(hosts, tempsByHost)
+    # hosts = [ host for host in hostList if host not in tempsByHost ]
+    # tempsByHost = getTempByHostThreaded(hosts, tempsByHost)
     speeds = [noFanSpeed, noFanSpeed, noFanSpeed, noFanSpeed]
     tempsByFan = [[],[],[],[]]
     for host in hostList:
