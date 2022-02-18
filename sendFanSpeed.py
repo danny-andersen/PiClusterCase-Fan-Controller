@@ -35,7 +35,7 @@ address = int(comms.get('address'), 16)
 # Protocol values
 startMsg = int(comms.get('startMsg', fallback=240))
 endMsg = int(comms.get('endMsg', fallback=250))
-noFanSpeed = int(comms.get('noFanSpeed', fallback=250))
+noFanSpeed = int(comms.get('noFanSpeed', fallback=255))
 
 # Shell command params to get host temp
 shellConfig = config['shell']

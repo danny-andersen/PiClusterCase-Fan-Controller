@@ -26,13 +26,14 @@ const int COMMS_HUNG_TIMEOUT = 600;  // If no message rx for 60 seconds then all
 const int BLINK_RATE = 5; // Number of DELAY_TIMEs to turn indicator LED on / off if no fan speed set for fan
 const int DELAY_TIME = 100; // loop every 100ms
 
-int currentSpeed[4] = {0, 0, 0, 0};
+int currentSpeed[4] = {0, 0, 0, 0};  //Current speed of fans
 int powerState[4] = {0, 0, 0, 0};
 
 byte minSpeed[4] = {60, 60, 60, 40}; //These are the defaults
 byte mediumSpeed[4] = {0, 0, 0, 0}; //Orange Indicator threshold
 byte highSpeed[4] = {0,0,0,0}; //Red Indicator threshold
 byte maxSpeed[4] = {100, 100, 100, 120};
+byte defaultSpeed[4] = {0, 0, 0, 0};  //Set to NO_FAN_SPEED if no fan speed received (and LED is flashed)
 byte fanSupplyVolts = 120;
 float rangeMultiplier = 255.0 / fanSupplyVolts;
 int timeSinceMsg = MSG_TIMEOUT; //Start as though no received a message
@@ -70,19 +71,25 @@ void loop() {
   for (int i=0; i<NUM_FANS; i++) {
     powerState[i] = analogRead(PINS_POWER_STATE_IN[i]);
   }
+  blinkCnt ++;
+  if (blinkCnt >= BLINK_RATE) {
+    blinkState = not blinkState;
+    blinkCnt = 0;
+  } 
+
   if (timeSinceMsg >= MSG_TIMEOUT) {
     //No control message received recently - blink indicator LED and send no fan speed
     //This will drive the fan according to the power status
-    blinkCnt ++;
-    if (blinkCnt >= BLINK_RATE) {
-      blinkState = not blinkState;
-      blinkCnt = 0;
-    } 
     for (int i=0; i<NUM_FANS; i++) {
       controlFan(i, NO_FAN_SPEED, blinkState);
     }
   } else {
-    blinkCnt = 0;
+    //Blink leds that are powered on but not received a fan speed for
+    for (int i=0; i<NUM_FANS; i++) {
+      if (defaultSpeed[i] == NO_FAN_SPEED) {
+        controlFan(i, NO_FAN_SPEED, blinkState);
+      }
+    }
   }
   if (timeSinceMsg >= COMMS_HUNG_TIMEOUT) {
     //Not received any comms for an extended period
@@ -157,6 +164,7 @@ void receiveMessage(int numBytes) {
     //Set new speed
     for (int i=0; i< NUM_FANS; i++) {
       controlFan(i, newSpeed[i], HIGH);
+      defaultSpeed[i] = newSpeed[i]; //Set to 255 if no speed received
     }
   }
 }
