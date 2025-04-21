@@ -44,7 +44,6 @@ tempCommand = shellConfig['tempCommand']
 tempResultFormat = shellConfig['tempResultFormat']
 tempResultParser = compile(tempResultFormat)
 userName = shellConfig['userName']
-dropboxAccessToken = shellConfig["dropboxAccessToken"]
 
 # Read hosts.ini file
 # configHosts = configparser.ConfigParser()
@@ -61,6 +60,10 @@ for slot in fans:
     hostInSlot = hosts[slot]
     if (hostInSlot != 'EMPTY'):
         fanByHost[hostInSlot] = int(fans[slot])
+
+config = configparser.ConfigParser()
+config.read('dropbox.ini')
+dropboxAccessToken = shellConfig["dropboxAccessToken"]
 
 
 lastFanState = [0, 0, 0, 0]
