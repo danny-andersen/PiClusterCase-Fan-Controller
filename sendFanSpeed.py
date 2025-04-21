@@ -159,6 +159,20 @@ def calcFanSpeed(fan, temp):
         
     return speed
 
+def convertSpeeds(speeds):
+    # Convert speeds to percentage
+    percSpeeds = []
+    for fan in range(0,4):
+        (minS, maxS) = fanSpeedRange[fan]
+        if (speeds[fan] == noFanSpeed):
+            percSpeeds.append(noFanSpeed)
+        elif (speeds[fan] == 0):
+            percSpeeds.append(0)
+        else:
+            percSpeeds.append(int((speeds[fan] - minS) * 100 / (maxS - minS)))
+    return percSpeeds
+
+
 def getRequiredFanSpeeds():
     tempsByHost = getTempByHostLocal(hostList)
     # hosts = [ host for host in hostList if host not in tempsByHost ]
@@ -230,11 +244,9 @@ if __name__ == "__main__":
         payload = createPayload(speeds)
         # Send payload to controller
         noOfTries = sendMessage(payload)
-        # #Append to the log file
-        # with open("fanSpeed.log", "a") as logFile:
-        #     logFile.write()
-        # Append log file to Dropbox every 30 seconds
-        dataStr = f"{timeStr},{temps}\n"
+        speedsAsPerc = convertSpeeds(speeds)
+        # Send temps and speeds to dropbox
+        dataStr = f"{timeStr}@{temps}@{speedsAsPerc}\n"
         dbx = dropbox.Dropbox(dropboxAccessToken)
         fileMeta = dbx.files_upload(
             dataStr.encode("utf-8"),
