@@ -1,3 +1,4 @@
+import os
 from smbus2 import SMBus
 from time import sleep
 import configparser
@@ -5,7 +6,7 @@ from fabric2 import Connection, ThreadingGroup, Result, exceptions
 from paramiko import ssh_exception
 from parse import parse, compile
 from datetime import datetime, timedelta
-import os
+import dropbox
 
 CRC7_POLY = 0x91
 
@@ -43,6 +44,7 @@ tempCommand = shellConfig['tempCommand']
 tempResultFormat = shellConfig['tempResultFormat']
 tempResultParser = compile(tempResultFormat)
 userName = shellConfig['userName']
+dropboxAccessToken = shellConfig["dropboxAccessToken"]
 
 # Read hosts.ini file
 # configHosts = configparser.ConfigParser()
@@ -59,6 +61,7 @@ for slot in fans:
     hostInSlot = hosts[slot]
     if (hostInSlot != 'EMPTY'):
         fanByHost[hostInSlot] = int(fans[slot])
+
 
 lastFanState = [0, 0, 0, 0]
 
@@ -163,11 +166,11 @@ def getRequiredFanSpeeds():
         temp = tempsByHost.get(host, 0.0)
         fan = fanByHost[host]
         tempsByFan[fan-1].append(temp)
-    print (f"{timeStr}: Measured Temps: {tempsByFan}")
+    # print (f"{timeStr}: Measured Temps: {tempsByFan}")
     for fan in range(0, len(speeds)):
         # Calc fan speed for max temp for hosts cooled by a fan
         speeds[fan] = calcFanSpeed(fan, max(tempsByFan[fan]))
-    return speeds
+    return (speeds, tempsByFan)
 
 def createPayload(speeds):
     #Create payload sending the desired fan speed for each fan as a byte
@@ -213,13 +216,29 @@ def sendMessage(payload):
     return attempts
 
 if __name__ == "__main__":
+
     while True:
         n = datetime.now()
         timeStr = n.strftime("%Y/%m/%d %H:%M:%S")
         #Get the speeds to set per fan based on CPU temps
-        speeds = getRequiredFanSpeeds()
+        (speeds, temps) = getRequiredFanSpeeds()
         #Create message payload
         payload = createPayload(speeds)
         # Send payload to controller
         noOfTries = sendMessage(payload)
+        # #Append to the log file
+        # with open("fanSpeed.log", "a") as logFile:
+        #     logFile.write()
+        # Append log file to Dropbox every 30 seconds
+        dataStr = f"{timeStr},{temps},{speeds}\n"
+        dbx = dropbox.Dropbox(dropboxAccessToken)
+        dbx.files_upload(
+            dataStr.encode("utf-8"),
+            "/fanSpeed.txt",
+            mode=dropbox.files.WriteMode.overwrite,
+            mute=True,
+            append=True
+        )
+            
         sleep(15.0 - noOfTries) # Update every couple of seconds
+        
