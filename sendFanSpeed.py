@@ -61,8 +61,9 @@ for slot in fans:
     if (hostInSlot != 'EMPTY'):
         fanByHost[hostInSlot] = int(fans[slot])
 
-config = configparser.ConfigParser()
-config.read('dropbox.ini')
+dbconfig = configparser.ConfigParser()
+dbconfig.read('dropbox.ini')
+shellConfig = dbconfig['shell']
 dropboxAccessToken = shellConfig["dropboxAccessToken"]
 
 
@@ -173,7 +174,7 @@ def getRequiredFanSpeeds():
     for fan in range(0, len(speeds)):
         # Calc fan speed for max temp for hosts cooled by a fan
         speeds[fan] = calcFanSpeed(fan, max(tempsByFan[fan]))
-    return (speeds, tempsByFan)
+    return (speeds, tempsByHost)
 
 def createPayload(speeds):
     #Create payload sending the desired fan speed for each fan as a byte
@@ -233,15 +234,14 @@ if __name__ == "__main__":
         # with open("fanSpeed.log", "a") as logFile:
         #     logFile.write()
         # Append log file to Dropbox every 30 seconds
-        dataStr = f"{timeStr},{temps},{speeds}\n"
+        dataStr = f"{timeStr},{temps}\n"
         dbx = dropbox.Dropbox(dropboxAccessToken)
-        dbx.files_upload(
+        fileMeta = dbx.files_upload(
             dataStr.encode("utf-8"),
-            "/fanSpeed.txt",
+            "/clusterNodesTemp.txt",
             mode=dropbox.files.WriteMode.overwrite,
-            mute=True,
-            append=True
         )
+        #print(f"Created remote file, meta: ${fileMeta}")
             
         sleep(15.0 - noOfTries) # Update every couple of seconds
         
